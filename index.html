@@ -230,6 +230,9 @@ input[type=range]{width:100%;accent-color:var(--accent);background:none;border:n
       </div>
       <button class="btn btn-primary btn-full" id="btn-login" onclick="fazerLogin()">Entrar</button>
       <p style="text-align:center;font-size:12px;color:var(--text3);margin-top:1rem">Não tem conta? Solicite ao administrador.</p>
+      <p style="text-align:center;font-size:11px;color:var(--text3);margin-top:.5rem">
+        Tela travada? <span style="cursor:pointer;text-decoration:underline;color:var(--accent2)" onclick="forcarLogout()">Clique aqui para limpar a sessão</span>
+      </p>
     </div>
     <!-- SIGNUP (apenas admin vê o link, mas qualquer um pode criar conta com o link correto) -->
     <div id="form-signup" class="auth-form">
@@ -639,8 +642,8 @@ input[type=range]{width:100%;accent-color:var(--accent);background:none;border:n
 // ══════════════════════════════════════════════════
 // CONFIGURAÇÃO — substitua pelos valores do seu projeto Supabase
 // ══════════════════════════════════════════════════
-const SUPABASE_URL = 'https://grxedochebzlyuskptea.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImdyeGVkb2NoZWJ6bHl1c2twdGVhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc3NjkyNTUsImV4cCI6MjA5MzM0NTI1NX0.pgp7uLhu1cyae3qxeBAGEBYJ7cPzm-kH81sRJQu2Vro';
+const SUPABASE_URL = 'COLE_AQUI_A_URL_DO_PROJETO';
+const SUPABASE_ANON_KEY = 'COLE_AQUI_A_ANON_KEY';
 // ══════════════════════════════════════════════════
 
 const { createClient } = window.supabase;
@@ -729,6 +732,16 @@ async function criarConta(){
 
 async function fazerLogout(){
   await sb.auth.signOut();
+  appIniciado=false;
+  location.reload();
+}
+
+// Força limpeza de sessão caso a página trave no carregamento
+async function forcarLogout(){
+  await sb.auth.signOut();
+  appIniciado=false;
+  localStorage.clear();
+  sessionStorage.clear();
   location.reload();
 }
 
@@ -794,17 +807,24 @@ async function carregarUsuarios(){
 }
 
 // ── CÁLCULOS ──
+// Fórmula: Estoque = (Ini + Entradas) × (1 - perda%) - Saídas + Ajustes
+// Perda incide apenas sobre entradas (inclui inicial), nunca sobre ajustes
+// Estoque pode ser negativo (para detectar perdas reais)
 function estoqueAtual(mat){
   const ini=(estoqueIni[mat]&&estoqueIni[mat].qtd)||0;
-  let ent=ini,sai=0,aj=0;
+  let entradas=0,saidas=0,ajustes=0;
   movs.forEach(m=>{
     if(m.material!==mat)return;
-    if(m.tipo==='entrada')ent+=parseFloat(m.peso)||0;
-    else if(m.tipo==='saida')sai+=parseFloat(m.peso)||0;
-    else if(m.tipo==='ajuste')aj+=parseFloat(m.ajuste_delta)||0;
+    if(m.tipo==='entrada')entradas+=parseFloat(m.peso)||0;
+    else if(m.tipo==='saida')saidas+=parseFloat(m.peso)||0;
+    else if(m.tipo==='ajuste')ajustes+=parseFloat(m.ajuste_delta)||0;
   });
   const p=(configs[mat]||0)/100;
-  return Math.max(0,(ent*(1-p))-sai+aj-(ini*p));
+  const totalEntradas=ini+entradas;
+  // perda estimada incide sobre tudo que entrou (incluindo estoque inicial)
+  const perdaEstimada=totalEntradas*p;
+  return totalEntradas - perdaEstimada - saidas + ajustes;
+  // NÃO usa Math.max — permite negativo para detectar perdas reais
 }
 
 function statsFor(mat,de,ate){
@@ -820,8 +840,11 @@ function statsFor(mat,de,ate){
     else if(m.tipo==='ajuste')ajD+=parseFloat(m.ajuste_delta)||0;
   });
   const p=(configs[mat]||0)/100;
-  const tE=(!de&&!ate?ini:0)+ent;
-  return{ini:(!de&&!ate?ini:0),ent,sai,custo,receita,perdaT:tE*p,est:(!de&&!ate?estoqueAtual(mat):null),ajD};
+  const totalEnt=(!de&&!ate?ini:0)+ent;
+  const perdaT=totalEnt*p;
+  // saldo do período = entradas - perdas - saidas + ajustes
+  const saldo=totalEnt - perdaT - sai + ajD;
+  return{ini:(!de&&!ate?ini:0),ent,sai,custo,receita,perdaT,est:(!de&&!ate?estoqueAtual(mat):null),ajD,saldo};
 }
 
 // ── ENTRADA ──
@@ -859,7 +882,11 @@ async function registrarSaida(){
     showAlert('alert-saida','Preencha data, material, peso e preço.','error');return;
   }
   const est=estoqueAtual(mat);
-  if(peso>est+0.001){showAlert('alert-saida',`Saída de ${f(peso)} t excede o estoque de ${f(est)} t de ${mat}.`,'error');return;}
+  // Aviso (não bloqueio) quando estoque ficaria negativo
+  if(peso>est+0.001){
+    const ok=confirm(`Atenção: esta saída de ${f(peso)} t excede o estoque estimado de ${f(est)} t de ${mat}.\n\nO estoque ficará negativo. Deseja registrar mesmo assim?`);
+    if(!ok)return;
+  }
   setBusy('btn-sai',true,'↑ Registrar saída');
   const{error}=await sb.from('movimentacoes').insert({
     data,tipo:'saida',material:mat,peso,preco,total:peso*preco,
@@ -1338,20 +1365,39 @@ function renderAjustesTable(){
 
 // ── CONFIG ──
 async function renderConfig(){
-  document.getElementById('cfg-perdas').innerHTML=MAT.map(m=>{
+  document.getElementById('cfg-perdas').innerHTML=`
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1rem">
+      Configure o percentual de perda estimada de pátio por material. 
+      <strong>Zere o slider para calcular sem desconto de perda</strong> — 
+      neste modo o estoque pode ficar negativo, revelando perdas reais.
+    </p>`+
+  MAT.map(m=>{
     const k=m.replace(/\W/g,'_');
+    const val=configs[m]!=null?configs[m]:2;
     return`<div class="config-row">
       <span>${m}</span>
-      <input type="range" min="0" max="15" step="0.5" value="${configs[m]||2}" id="sl-${k}"
-        oninput="configs['${m}']=parseFloat(this.value);document.getElementById('sv-${k}').textContent=parseFloat(this.value).toFixed(1)+'%';salvarConfig('${m}',parseFloat(this.value));">
-      <span class="sv" id="sv-${k}">${(configs[m]||2).toFixed(1)}%</span>
+      <input type="range" min="0" max="15" step="0.5" value="${val}" id="sl-${k}"
+        oninput="configs['${m}']=parseFloat(this.value);document.getElementById('sv-${k}').textContent=parseFloat(this.value).toFixed(1)+'%';">
+      <span class="sv" id="sv-${k}">${Number(val).toFixed(1)}%</span>
     </div>`;
-  }).join('');
+  }).join('')+
+  `<div style="display:flex;justify-content:flex-end;margin-top:1rem">
+    <button class="btn btn-primary btn-sm" onclick="salvarTodasConfigs()">Salvar percentuais</button>
+  </div>`;
 }
 
-async function salvarConfig(material,valor){
-  await sb.from('configuracoes').upsert({material,perda_pct:valor,atualizado_em:new Date().toISOString()},{onConflict:'material'});
+async function salvarTodasConfigs(){
+  const updates=MAT.map(m=>{
+    const k=m.replace(/\W/g,'_');
+    const el=document.getElementById('sl-'+k);
+    const val=el?parseFloat(el.value):configs[m]||0;
+    configs[m]=val;
+    return{material:m,perda_pct:val,atualizado_em:new Date().toISOString()};
+  });
+  const{error}=await sb.from('configuracoes').upsert(updates,{onConflict:'material'});
+  if(error){toast('Erro ao salvar: '+error.message,'error');return;}
   renderTudo();
+  toast('Percentuais de perda salvos com sucesso.');
 }
 
 // ── IMPRESSÃO ──
@@ -1377,24 +1423,45 @@ async function importarCSV(input){
   reader.onload=async e=>{
     const lines=e.target.result.trim().split('\n');
     let ok=0,erros=0,inserts=[];
+    const erroDetail=[];
     lines.forEach((line,i)=>{
+      // pula cabeçalho e linhas de comentário
       if(i===0&&line.toLowerCase().includes('data'))return;
+      if(line.trim().startsWith('//'))return;
+      if(!line.trim())return;
       const cols=line.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
-      if(cols.length<5){erros++;return;}
+      if(cols.length<5){erros++;erroDetail.push(`Linha ${i+1}: colunas insuficientes`);return;}
       const[data,tipo,material,peso,preco,parte,nota]=cols;
-      if(!MAT.includes(material)){erros++;return;}
-      if(!['entrada','saida'].includes((tipo||'').toLowerCase())){erros++;return;}
+      if(!data||!/^\d{4}-\d{2}-\d{2}$/.test(data)){erros++;erroDetail.push(`Linha ${i+1}: data inválida "${data}" — use AAAA-MM-DD`);return;}
+      if(!MAT.includes(material)){erros++;erroDetail.push(`Linha ${i+1}: material "${material}" não reconhecido`);return;}
+      if(!['entrada','saida'].includes((tipo||'').toLowerCase().trim())){erros++;erroDetail.push(`Linha ${i+1}: tipo "${tipo}" inválido — use entrada ou saida`);return;}
       const p=parseFloat(peso),pr=parseFloat(preco);
-      if(isNaN(p)||isNaN(pr)){erros++;return;}
-      inserts.push({data,tipo:tipo.toLowerCase(),material,peso:p,preco:pr,total:p*pr,parte:parte||'',nota:nota||'',usuario_id:currentUser.id,usuario_nome:currentPerfil?.nome||currentUser.email});
+      if(isNaN(p)||p<=0){erros++;erroDetail.push(`Linha ${i+1}: peso inválido "${peso}"`);return;}
+      if(isNaN(pr)||pr<=0){erros++;erroDetail.push(`Linha ${i+1}: preço inválido "${preco}"`);return;}
+      inserts.push({
+        data,tipo:tipo.toLowerCase().trim(),material,peso:p,preco:pr,total:p*pr,
+        parte:parte||'',nota:nota||'',
+        usuario_id:currentUser.id,usuario_nome:(currentPerfil?.nome||currentUser.email)+' (import CSV)'
+      });
       ok++;
     });
-    if(inserts.length){const{error}=await sb.from('movimentacoes').insert(inserts);if(error){toast(error.message,'error');return;}}
+    if(inserts.length){
+      // insere em lotes de 50
+      for(let i=0;i<inserts.length;i+=50){
+        const lote=inserts.slice(i,i+50);
+        const{error}=await sb.from('movimentacoes').insert(lote);
+        if(error){toast('Erro ao importar: '+error.message,'error');input.value='';return;}
+      }
+    }
     await carregarMovs();renderTudo();
-    showAlert('alert-import',`${ok} registro(s) importado(s).${erros>0?' '+erros+' com erro.':''}`,ok>0?'success':'error');
+    let msg=`${ok} registro(s) importado(s) com sucesso.`;
+    if(erros>0)msg+=` ${erros} linha(s) ignorada(s).`;
+    showAlert('alert-import',msg,ok>0?'success':'error');
+    if(erroDetail.length>0)console.warn('Erros de importação:\n'+erroDetail.join('\n'));
+    if(erros>0)toast(`${erros} linha(s) com erro — verifique o console (F12) para detalhes`,'error');
     input.value='';
   };
-  reader.readAsText(file);
+  reader.readAsText(file,'UTF-8');
 }
 
 function exportarCSV(){
@@ -1406,10 +1473,41 @@ function exportarCSV(){
 }
 
 function baixarModelo(){
-  const m='data,tipo,material,peso,preco,fornec_cliente,nota\n2025-01-15,entrada,Areia Grossa,25.500,85.00,Fornecedor Exemplo,NF-0001\n2025-01-16,saida,Areia Grossa,12.000,120.00,Cliente Exemplo,NF-0100';
+  // Modelo completo com todos os materiais e exemplos de entrada e saída
+  const linhas=[
+    'data,tipo,material,peso,preco,fornec_cliente,nota',
+    '// INSTRUÇÕES:',
+    '// - data: formato AAAA-MM-DD (ex: 2025-06-01)',
+    '// - tipo: entrada  OU  saida',
+    '// - material: exatamente um dos nomes abaixo',
+    '// - peso: em toneladas, use ponto como decimal (ex: 25.500)',
+    '// - preco: preço por tonelada, use ponto como decimal (ex: 85.00)',
+    '// - fornec_cliente: nome do fornecedor (entrada) ou cliente (saída)',
+    '// - nota: número da nota fiscal ou pedido',
+    '//',
+    '// MATERIAIS ACEITOS:',
+    '// Areia Grossa | Areia Fina | Areia de Cava/Amarela | Areia Mista | Areião | Brita 01 (1/2) | Pedrisco de Brita',
+    '//',
+    '// EXEMPLOS:',
+    '2025-06-01,entrada,Areia Grossa,25.500,85.00,Fornecedor ABC,NF-0001',
+    '2025-06-01,entrada,Areia Fina,18.200,90.00,Fornecedor ABC,NF-0002',
+    '2025-06-02,entrada,Brita 01 (1/2),30.000,110.00,Pedreira XYZ,NF-0100',
+    '2025-06-03,saida,Areia Grossa,12.000,120.00,Cliente Silva,NF-0200',
+    '2025-06-03,saida,Areia Fina,8.500,130.00,Cliente Obras,NF-0201',
+  ];
+  // Remove linhas de comentário ao gerar — mantém só o cabeçalho e exemplos reais
+  const csvFinal=[
+    'data,tipo,material,peso,preco,fornec_cliente,nota',
+    '2025-06-01,entrada,Areia Grossa,25.500,85.00,Fornecedor ABC,NF-0001',
+    '2025-06-01,entrada,Areia Fina,18.200,90.00,Fornecedor ABC,NF-0002',
+    '2025-06-02,entrada,Brita 01 (1/2),30.000,110.00,Pedreira XYZ,NF-0100',
+    '2025-06-03,saida,Areia Grossa,12.000,120.00,Cliente Silva,NF-0200',
+    '2025-06-03,saida,Areia Fina,8.500,130.00,Cliente Obras,NF-0201',
+  ];
   const a=document.createElement('a');
-  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(m);
-  a.download='modelo_importacao.csv';a.click();
+  a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csvFinal.join('\n'));
+  a.download='modelo_importacao_estoque.csv';a.click();
+  toast('Modelo CSV baixado. Edite no Excel ou Google Planilhas e importe.');
 }
 
 // ── RENDER GERAL ──
@@ -1428,17 +1526,39 @@ function renderTudo(){
 }
 
 // ── BOOT ──
+let appIniciado=false;
+
 sb.auth.onAuthStateChange(async(event,session)=>{
+  // SIGNED_OUT ou TOKEN_REFRESH_FAILED → volta para login
+  if(event==='SIGNED_OUT'||event==='TOKEN_REFRESH_FAILED'){
+    appIniciado=false;
+    document.getElementById('loading').style.display='none';
+    document.getElementById('auth-screen').style.display='flex';
+    document.getElementById('app-screen').style.display='none';
+    return;
+  }
   if(session?.user){
-    if(document.getElementById('app-screen').style.display==='none'||document.getElementById('app-screen').style.display===''){
+    // evita re-inicializar se já estava na tela do app (ex: realtime events)
+    if(!appIniciado){
+      appIniciado=true;
       await iniciar(session.user);
     }
   } else {
+    appIniciado=false;
     document.getElementById('loading').style.display='none';
     document.getElementById('auth-screen').style.display='flex';
     document.getElementById('app-screen').style.display='none';
   }
 });
+
+// Segurança extra: verifica sessão ativa ao carregar a página
+(async()=>{
+  const{data:{session}}=await sb.auth.getSession();
+  if(!session){
+    document.getElementById('loading').style.display='none';
+    document.getElementById('auth-screen').style.display='flex';
+  }
+})();
 
 // fechar modais ao clicar fora
 ['modal-ed','modal-usuario','modal-confirm'].forEach(id=>{
