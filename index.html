@@ -281,9 +281,11 @@ input[type=range]{width:100%;accent-color:var(--accent);background:none;border:n
   <div class="nav-item" onclick="sp('ajuste',this)"><span class="nav-icon">⇄</span> Ajuste de estoque</div>
   <div class="nav-item" onclick="sp('historico',this)"><span class="nav-icon">≡</span> Histórico</div>
   <div class="sb-sec">Sistema</div>
+  <div class="nav-item" onclick="sp('importar',this)"><span class="nav-icon">↥</span> Importar planilha</div>
+  <div class="nav-item" onclick="sp('perda-patio',this)"><span class="nav-icon">%</span> Perda de pátio</div>
   <div class="nav-item admin-only" onclick="sp('estoque-inicial',this)"><span class="nav-icon">◎</span> Estoque inicial</div>
   <div class="nav-item admin-only" onclick="sp('usuarios',this)"><span class="nav-icon">👤</span> Usuários</div>
-  <div class="nav-item admin-only" onclick="sp('config',this)"><span class="nav-icon">⚙</span> Configurações</div>
+  <div class="nav-item admin-only" onclick="sp('config',this)"><span class="nav-icon">⚙</span> Config. avançadas</div>
 </nav>
 
 <main class="main">
@@ -549,6 +551,85 @@ input[type=range]{width:100%;accent-color:var(--accent);background:none;border:n
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-sm" onclick="exportarCSV()">⬇ Exportar CSV</button>
       <button class="btn btn-sm" onclick="baixarModelo()">⬇ Modelo CSV</button>
+    </div>
+  </div>
+</div>
+
+
+<!-- IMPORTAR PLANILHA -->
+<div id="page-importar" class="page">
+  <div class="ph"><div class="pt">Importar Planilha</div></div>
+  <div class="card">
+    <div class="ct">Upload de arquivo CSV — entradas e saídas em lote</div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1.25rem;line-height:1.6">
+      Importe múltiplos lançamentos de uma vez enviando um arquivo CSV.<br>
+      O arquivo pode ser criado no <strong>Excel</strong> ou <strong>Google Planilhas</strong> e salvo como CSV.
+    </p>
+    <div class="import-area" id="drop-zone" onclick="document.getElementById('csv-upload').click()"
+      ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+      ondragleave="this.style.borderColor='var(--border2)'"
+      ondrop="event.preventDefault();this.style.borderColor='var(--border2)';importarCSV({files:event.dataTransfer.files})">
+      <div style="font-size:2rem;margin-bottom:.5rem">📂</div>
+      <div style="font-weight:500;margin-bottom:.25rem">Clique para selecionar ou arraste o arquivo aqui</div>
+      <div class="ih">Formatos aceitos: .csv</div>
+      <div class="ih">Colunas: data · tipo · material · peso · preco · fornec_cliente · nota</div>
+    </div>
+    <input type="file" id="csv-upload" accept=".csv" style="display:none" onchange="importarCSV(this)">
+    <div id="alert-import-page"></div>
+    <div id="import-preview" style="display:none">
+      <div class="ct" style="margin-top:1rem">Pré-visualização — primeiros registros</div>
+      <div class="tw"><table>
+        <thead><tr><th>Data</th><th>Tipo</th><th>Material</th><th>Peso (t)</th><th>Preço/t</th><th>Fornec./Cliente</th><th>Nota</th><th>Status</th></tr></thead>
+        <tbody id="import-preview-body"></tbody>
+      </table></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-top:1rem;flex-wrap:wrap;gap:8px">
+        <span id="import-summary" style="font-size:13px;color:var(--text2)"></span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" onclick="document.getElementById('import-preview').style.display='none'">Cancelar</button>
+          <button class="btn btn-primary btn-sm" id="btn-confirmar-import" onclick="confirmarImport()">✓ Confirmar importação</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ct">Exportar e modelo</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-sm" onclick="exportarCSV()">⬇ Exportar histórico CSV</button>
+      <button class="btn btn-primary btn-sm" onclick="baixarModelo()">⬇ Baixar modelo CSV preenchido</button>
+    </div>
+    <div style="margin-top:1rem;background:var(--surface2);border-radius:var(--r);padding:1rem;font-size:12px;font-family:var(--mono);color:var(--text2)">
+      <strong>Formato esperado:</strong><br>
+      data,tipo,material,peso,preco,fornec_cliente,nota<br>
+      2025-06-01,entrada,Areia Grossa,25.500,85.00,Fornecedor ABC,NF-0001<br>
+      2025-06-02,saida,Areia Grossa,10.000,120.00,Cliente Silva,NF-0100
+    </div>
+  </div>
+</div>
+
+<!-- PERDA DE PÁTIO -->
+<div id="page-perda-patio" class="page">
+  <div class="ph"><div class="pt">Perda de Pátio</div></div>
+  <div class="card">
+    <div class="ct">Percentual estimado de perda por material (%)</div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1.25rem;line-height:1.6">
+      Configure o desconto de perda de pátio para cada material.<br>
+      <strong>Zero (0%)</strong> = sem desconto de perda — o estoque pode ficar negativo, revelando perdas reais.<br>
+      Ajuste os sliders e clique em <strong>Salvar</strong>.
+    </p>
+    <div id="perda-sliders"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:1.25rem">
+      <button class="btn btn-primary" onclick="salvarTodasConfigs()">Salvar percentuais</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ct">Como funciona o cálculo</div>
+    <div style="font-size:13px;color:var(--text2);line-height:1.8">
+      <strong>Fórmula do estoque:</strong><br>
+      Estoque = (Est. inicial + Entradas) × (1 − perda%) − Saídas + Ajustes<br><br>
+      <strong>Exemplo com 2% de perda:</strong><br>
+      Entrou 100 t → perda estimada = 2 t → disponível = 98 t<br><br>
+      <strong>Com 0% de perda:</strong><br>
+      Entrou 100 t, saiu 105 t → estoque = −5 t (negativo = perda real detectada)
     </div>
   </div>
 </div>
@@ -1040,6 +1121,8 @@ function sp(id,el,mobile){
   if(id==='estoque-inicial')renderFormInicial();
   if(id==='usuarios')renderUsuarios();
   if(id==='config')renderConfig();
+  if(id==='perda-patio')renderPerdaSliders();
+  if(id==='importar')resetImportPage();
 }
 
 // ── SELECTS / DATES ──
@@ -1385,8 +1468,11 @@ async function renderConfig(){
 async function salvarTodasConfigs(){
   const updates=MAT.map(m=>{
     const k=m.replace(/\W/g,'_');
-    const el=document.getElementById('sl-'+k);
-    const val=el?parseFloat(el.value):configs[m]||0;
+    // tenta ler do slider da página config primeiro, depois do perda-patio
+    const elCfg=document.getElementById('sl-'+k);
+    const elPerda=document.getElementById('psl-'+k);
+    const el=elCfg||elPerda;
+    const val=el?parseFloat(el.value):(configs[m]!=null?configs[m]:2);
     configs[m]=val;
     return{material:m,perda_pct:val,atualizado_em:new Date().toISOString()};
   });
@@ -1504,6 +1590,116 @@ function baixarModelo(){
   a.href='data:text/csv;charset=utf-8,'+encodeURIComponent(csvFinal.join('\n'));
   a.download='modelo_importacao_estoque.csv';a.click();
   toast('Modelo CSV baixado. Edite no Excel ou Google Planilhas e importe.');
+}
+
+// ── PERDA DE PÁTIO ──
+function renderPerdaSliders(){
+  document.getElementById('perda-sliders').innerHTML=MAT.map(m=>{
+    const k=m.replace(/\W/g,'_');
+    const val=configs[m]!=null?Number(configs[m]):2;
+    return`<div class="config-row">
+      <span style="font-size:13px">${m}</span>
+      <input type="range" min="0" max="15" step="0.5" value="${val}" id="psl-${k}"
+        oninput="configs['${m}']=parseFloat(this.value);document.getElementById('psv-${k}').textContent=parseFloat(this.value).toFixed(1)+'%'">
+      <span class="sv" id="psv-${k}">${val.toFixed(1)}%</span>
+    </div>`;
+  }).join('');
+}
+
+// ── IMPORTAÇÃO COM PREVIEW ──
+let pendingImports=[];
+
+function resetImportPage(){
+  pendingImports=[];
+  const p=document.getElementById('import-preview');
+  if(p)p.style.display='none';
+  const a=document.getElementById('alert-import-page');
+  if(a)a.innerHTML='';
+  const u=document.getElementById('csv-upload');
+  if(u)u.value='';
+}
+
+function importarCSV(input){
+  const file=(input.files||input)[0]||(input.files&&input.files[0]);
+  const f2=input.files?input.files[0]:input[0];
+  const finalFile=input.files?input.files[0]:null;
+  if(!finalFile&&!file)return;
+  const theFile=finalFile||file;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const lines=e.target.result.trim().split('\n');
+    const validos=[];const erros=[];
+    lines.forEach((line,i)=>{
+      if(i===0&&line.toLowerCase().includes('data'))return;
+      if(line.trim().startsWith('//'))return;
+      if(!line.trim())return;
+      const cols=line.split(',').map(c=>c.trim().replace(/^"|"$/g,''));
+      if(cols.length<5){erros.push({linha:i+1,erro:'Colunas insuficientes',raw:line});return;}
+      const[data,tipo,material,peso,preco,parte,nota]=cols;
+      if(!data||!/^\d{4}-\d{2}-\d{2}$/.test(data)){erros.push({linha:i+1,erro:`Data inválida: "${data}"`,raw:line});return;}
+      if(!MAT.includes(material)){erros.push({linha:i+1,erro:`Material não reconhecido: "${material}"`,raw:line});return;}
+      if(!['entrada','saida'].includes((tipo||'').toLowerCase().trim())){erros.push({linha:i+1,erro:`Tipo inválido: "${tipo}"`,raw:line});return;}
+      const p=parseFloat(peso),pr=parseFloat(preco);
+      if(isNaN(p)||p<=0){erros.push({linha:i+1,erro:`Peso inválido: "${peso}"`,raw:line});return;}
+      if(isNaN(pr)||pr<=0){erros.push({linha:i+1,erro:`Preço inválido: "${preco}"`,raw:line});return;}
+      validos.push({data,tipo:tipo.toLowerCase().trim(),material,peso:p,preco:pr,total:p*pr,parte:parte||'',nota:nota||''});
+    });
+    pendingImports=validos;
+    // mostra preview
+    const preview=document.getElementById('import-preview');
+    const tbody=document.getElementById('import-preview-body');
+    const summary=document.getElementById('import-summary');
+    tbody.innerHTML=[...validos.slice(0,10),...(validos.length>10?[null]:[])]
+      .filter(Boolean).map(r=>`<tr>
+        <td style="font-family:var(--mono);font-size:12px">${fDate(r.data)}</td>
+        <td><span class="tipo-${r.tipo}">${r.tipo==='entrada'?'Entrada':'Saída'}</span></td>
+        <td>${r.material}</td>
+        <td style="font-family:var(--mono)">${f(r.peso)}</td>
+        <td style="font-family:var(--mono)">${fR(r.preco)}</td>
+        <td>${r.parte||'—'}</td>
+        <td style="font-size:12px">${r.nota||'—'}</td>
+        <td><span class="badge bg-green">✓ Ok</span></td>
+      </tr>`).join('')+
+      (erros.length?erros.slice(0,5).map(r=>`<tr>
+        <td colspan="7" style="font-size:12px;color:var(--accent2)">Linha ${r.linha}: ${r.erro}</td>
+        <td><span class="badge bg-red">✗ Erro</span></td>
+      </tr>`).join(''):'');
+    if(validos.length>10){
+      tbody.innerHTML+=`<tr><td colspan="8" style="text-align:center;color:var(--text3);font-size:12px">... e mais ${validos.length-10} registros válidos</td></tr>`;
+    }
+    summary.textContent=`${validos.length} registro(s) válido(s)${erros.length?' · '+erros.length+' com erro (serão ignorados)':''}`;
+    preview.style.display='block';
+    document.getElementById('btn-confirmar-import').disabled=validos.length===0;
+    const alertEl=document.getElementById('alert-import-page');
+    if(erros.length>0&&validos.length===0){
+      alertEl.innerHTML=`<div class="alert alert-error">Nenhum registro válido encontrado. Verifique o formato do arquivo.</div>`;
+    } else {
+      alertEl.innerHTML='';
+    }
+  };
+  reader.readAsText(theFile,'UTF-8');
+}
+
+async function confirmarImport(){
+  if(!pendingImports.length)return;
+  const btn=document.getElementById('btn-confirmar-import');
+  btn.disabled=true;btn.textContent='Importando...';
+  const inserts=pendingImports.map(r=>({...r,usuario_id:currentUser.id,usuario_nome:(currentPerfil?.nome||currentUser.email)+' (CSV)'}));
+  for(let i=0;i<inserts.length;i+=50){
+    const lote=inserts.slice(i,i+50);
+    const{error}=await sb.from('movimentacoes').insert(lote);
+    if(error){
+      toast('Erro ao importar: '+error.message,'error');
+      btn.disabled=false;btn.textContent='✓ Confirmar importação';
+      return;
+    }
+  }
+  await carregarMovs();renderTudo();
+  document.getElementById('import-preview').style.display='none';
+  document.getElementById('alert-import-page').innerHTML=`<div class="alert alert-success">${pendingImports.length} registro(s) importado(s) com sucesso!</div>`;
+  pendingImports=[];
+  btn.disabled=false;btn.textContent='✓ Confirmar importação';
+  toast(`${inserts.length} registros importados com sucesso!`);
 }
 
 // ── RENDER GERAL ──
